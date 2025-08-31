@@ -102,8 +102,9 @@
     </div>
 
     <script>
-        // --- IMPORTANT: AFTER DEPLOYING, PASTE YOUR CLOUD FUNCTION URL HERE ---
+        // --- IMPORTANT: PASTE YOUR DEPLOYMENT URLS AND SECRET KEY HERE ---
         const CLOUD_FUNCTION_URL = 'https://nonprofit-data-processor-741053962703.us-west2.run.app'; 
+        const API_KEY = '5befb228-575f-4c68-8c49-21cb2ead5d94';
 
         const fileDropZone = document.getElementById('fileDropZone');
         const fileInput = document.getElementById('fileInput');
@@ -135,7 +136,7 @@
                 uploadedFile = file;
                 dropZoneText.innerHTML = `✅<br>File selected: <strong>${file.name}</strong>`;
                 processButton.disabled = false;
-                statusDiv.textContent = ''; // Clear previous status
+                statusDiv.textContent = '';
             } else {
                 alert("Please select a valid CSV file.");
                 uploadedFile = null;
@@ -146,19 +147,23 @@
         processButton.addEventListener('click', async () => {
             if (!uploadedFile) return;
 
-            if (CLOUD_FUNCTION_URL === 'PASTE_YOUR_TRIGGER_URL_HERE' || !CLOUD_FUNCTION_URL) {
-                alert("Configuration Error: The Cloud Function URL has not been set in the index.html file. Please contact the administrator.");
+            if (CLOUD_FUNCTION_URL === 'https://nonprofit-data-processor-741053962703.us-west2.run.app' || API_KEY === '5befb228-575f-4c68-8c49-21cb2ead5d94') {
+                alert("Configuration Error: The API endpoint has not been configured. Please contact the administrator.");
                 return;
             }
 
             processButton.disabled = true;
             statusDiv.className = 'status-processing';
-            statusDiv.textContent = 'Uploading and processing... This may take several minutes for large files. Please be patient.';
+            statusDiv.textContent = 'Uploading and processing... This may take several minutes. Please be patient.';
 
             try {
+                // --- THIS IS THE CHANGE: The API Key is added to the request headers ---
                 const response = await fetch(CLOUD_FUNCTION_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'text/csv' },
+                    headers: { 
+                        'Content-Type': 'text/csv',
+                        'X-API-KEY': API_KEY 
+                    },
                     body: uploadedFile
                 });
 
@@ -192,3 +197,4 @@
     </script>
 </body>
 </html>
+
