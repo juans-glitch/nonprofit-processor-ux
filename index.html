@@ -102,9 +102,6 @@
     </div>
 
     <script>
-        // --- IMPORTANT: AFTER DEPLOYING, PASTE YOUR CLOUD FUNCTION URL HERE ---
-        const CLOUD_FUNCTION_URL = 'https://nonprofit-data-processor-741053962703.us-west2.run.app'; 
-
         const fileDropZone = document.getElementById('fileDropZone');
         const fileInput = document.getElementById('fileInput');
         const processButton = document.getElementById('processButton');
@@ -146,25 +143,21 @@
         processButton.addEventListener('click', async () => {
             if (!uploadedFile) return;
 
-            if (CLOUD_FUNCTION_URL === 'PASTE_YOUR_TRIGGER_URL_HERE' || !CLOUD_FUNCTION_URL) {
-                alert("Configuration Error: The Cloud Function URL has not been set in the index.html file. Please contact the administrator.");
-                return;
-            }
-
             processButton.disabled = true;
             statusDiv.className = 'status-processing';
             statusDiv.textContent = 'Uploading and processing... This may take several minutes for large files. Please be patient.';
 
             try {
-                const response = await fetch(CLOUD_FUNCTION_URL, {
+                // The URL is now relative, pointing to the service itself.
+                const response = await fetch('/', {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/csv' },
                     body: uploadedFile
                 });
 
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Server error (${response.status}): ${errorText}`);
+                    // Pass the whole response to the catch block to handle specific errors.
+                    throw response;
                 }
 
                 const blob = await response.blob();
@@ -172,7 +165,12 @@
                 const a = document.createElement('a');
                 a.style.display = 'none';
                 a.href = downloadUrl;
-                a.download = 'nonprofit_data_extract.csv';
+                
+                // Create a dynamic filename with the current date.
+                const today = new Date();
+                const dateString = today.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+                a.download = `nonprofit_data_extract_${dateString}.csv`;
+                
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(downloadUrl);
@@ -183,7 +181,27 @@
 
             } catch (error) {
                 statusDiv.className = 'status-error';
-                statusDiv.textContent = `An error occurred: ${error.message}`;
+                
+                // Enhanced, user-friendly error handling.
+                if (error instanceof Response) {
+                    const errorText = await error.text();
+                    switch (error.status) {
+                        case 404:
+                            statusDiv.textContent = 'Processing finished, but no data could be found for the entries provided. Please check your CSV for typos.';
+                            break;
+                        case 413:
+                            statusDiv.textContent = 'The uploaded file is too large. Please split it into smaller files and try again.';
+                            break;
+                        case 400:
+                            statusDiv.textContent = `Error: The CSV file is invalid. The server says: "${errorText}"`;
+                            break;
+                        default:
+                            statusDiv.textContent = `An unexpected server error occurred (Code: ${error.status}). Please try again later.`;
+                    }
+                } else {
+                    // For network errors or other issues.
+                    statusDiv.textContent = 'A network error occurred. Please check your connection and try again.';
+                }
                 console.error('Error:', error);
             } finally {
                 processButton.disabled = false;
