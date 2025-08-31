@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nonprofit 990 Data Processor</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f4f7f9;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            background: #ffffff;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+        }
+        h1 {
+            color: #1a1a1a;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        p {
+            color: #666;
+            font-size: 16px;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+        .file-upload-area {
+            border: 2px dashed #d0dbe4;
+            border-radius: 8px;
+            padding: 50px 20px;
+            cursor: pointer;
+            background-color: #f8fafc;
+            transition: all 0.2s ease-in-out;
+        }
+        .file-upload-area.dragover {
+            border-color: #007bff;
+            background-color: #e9f5ff;
+        }
+        #fileInput {
+            display: none;
+        }
+        #dropZoneText {
+            color: #555;
+            font-weight: 500;
+        }
+        button {
+            font-size: 16px;
+            font-weight: bold;
+            padding: 14px 28px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            width: 100%;
+            margin-top: 20px;
+            transition: background-color 0.2s;
+        }
+        button:disabled {
+            background-color: #c0c8d1;
+            cursor: not-allowed;
+        }
+        button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+        #status {
+            margin-top: 25px;
+            font-weight: 500;
+            min-height: 24px;
+        }
+        .status-processing { color: #007bff; }
+        .status-error { color: #dc3545; font-weight: bold; }
+        .status-success { color: #28a745; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Nonprofit 990 Data Processor</h1>
+        <p>Upload a CSV file with two columns, 'ein' and 'year'. Each line is counted as a single entry, a single filing to be retrieved and processed.</p> 
+        <p>For example, a single, proper entry would have '123456789' under the <mark>ein</mark> column and '2019' under the <mark>year</mark> column. 
+            The tool will download, process, and provide a final data extract for you.</p>
+        
+        <div id="fileDropZone" class="file-upload-area">
+            <input type="file" id="fileInput" accept=".csv">
+            <p id="dropZoneText"><strong>Drag & drop your CSV file here</strong><br>or click to select a file.</p>
+        </div>
+
+        <button id="processButton" disabled>Process Files</button>
+
+        <div id="status"></div>
+    </div>
+
+    <script>
+        // --- IMPORTANT: AFTER DEPLOYING, PASTE YOUR CLOUD FUNCTION URL HERE ---
+        const CLOUD_FUNCTION_URL = 'PASTE_YOUR_TRIGGER_URL_HERE'; 
+
+        const fileDropZone = document.getElementById('fileDropZone');
+        const fileInput = document.getElementById('fileInput');
+        const processButton = document.getElementById('processButton');
+        const statusDiv = document.getElementById('status');
+        const dropZoneText = document.getElementById('dropZoneText');
+        let uploadedFile = null;
+
+        fileDropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            fileDropZone.addEventListener(eventName, preventDefaults, false);
+        });
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        fileDropZone.addEventListener('dragover', () => fileDropZone.classList.add('dragover'));
+        fileDropZone.addEventListener('dragleave', () => fileDropZone.classList.remove('dragover'));
+        fileDropZone.addEventListener('drop', (e) => {
+            fileDropZone.classList.remove('dragover');
+            handleFile(e.dataTransfer.files[0]);
+        });
+
+        function handleFile(file) {
+            if (file && (file.type === "text/csv" || file.name.toLowerCase().endsWith('.csv'))) {
+                uploadedFile = file;
+                dropZoneText.innerHTML = `✅<br>File selected: <strong>${file.name}</strong>`;
+                processButton.disabled = false;
+                statusDiv.textContent = ''; // Clear previous status
+            } else {
+                alert("Please select a valid CSV file.");
+                uploadedFile = null;
+                processButton.disabled = true;
+            }
+        }
+
+        processButton.addEventListener('click', async () => {
+            if (!uploadedFile) return;
+
+            if (CLOUD_FUNCTION_URL === 'PASTE_YOUR_TRIGGER_URL_HERE' || !CLOUD_FUNCTION_URL) {
+                alert("Configuration Error: The Cloud Function URL has not been set in the index.html file. Please contact the administrator.");
+                return;
+            }
+
+            processButton.disabled = true;
+            statusDiv.className = 'status-processing';
+            statusDiv.textContent = 'Uploading and processing... This may take several minutes for large files. Please be patient.';
+
+            try {
+                const response = await fetch(CLOUD_FUNCTION_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'text/csv' },
+                    body: uploadedFile
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server error (${response.status}): ${errorText}`);
+                }
+
+                const blob = await response.blob();
+                const downloadUrl = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = downloadUrl;
+                a.download = 'nonprofit_data_extract.csv';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(downloadUrl);
+                document.body.removeChild(a);
+                
+                statusDiv.className = 'status-success';
+                statusDiv.textContent = 'Processing complete! Your download has started.';
+
+            } catch (error) {
+                statusDiv.className = 'status-error';
+                statusDiv.textContent = `An error occurred: ${error.message}`;
+                console.error('Error:', error);
+            } finally {
+                processButton.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
