@@ -1,2 +1,2 @@
 # nonprofit-processor-ux
-990 form processor that takes a CSV of desired EINs and years and extracts financial data from the XMLs.
+ a 990 form processor that extracts financial data from XMLs and returns a CSV file 
