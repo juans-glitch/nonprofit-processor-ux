@@ -16,6 +16,8 @@ The project is composed of two main parts that work together:
 * **Robust Input Validation**: The backend checks for common errors in the input file, such as exceeding a maximum row count or missing required columns (`ein`, `year`), and provides clear feedback.
 * **User-Friendly Error Handling**: The frontend displays specific, easy-to-understand error messages to help users correct their input.
 * **Dynamic Filenames**: Downloaded CSV files are automatically named with the current date (e.g., `nonprofit_data_extract_2025-09-01.csv`) to help with organization.
+* **Cost Control**: Create a "circuit breaker" function that automatically disables the service if it approaches a Cloud Billing budget limit.
+
 
 ## Setup & Configuration
 
