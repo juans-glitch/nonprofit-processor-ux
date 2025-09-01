@@ -163,8 +163,8 @@
                 });
 
                 if (!response.ok) {
-                    const errorText = await response.text();
-                    throw new Error(`Server error (${response.status}): ${errorText}`);
+                    // Throw the entire response to the catch block to be handled
+                    throw response;
                 }
 
                 const blob = await response.blob();
@@ -172,7 +172,12 @@
                 const a = document.createElement('a');
                 a.style.display = 'none';
                 a.href = downloadUrl;
-                a.download = 'nonprofit_data_extract.csv';
+                
+                // --- MODIFIED: Create a dynamic filename with the current date ---
+                const today = new Date();
+                const dateString = today.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+                a.download = `nonprofit_data_extract_${dateString}.csv`;
+                
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(downloadUrl);
@@ -182,8 +187,25 @@
                 statusDiv.textContent = 'Processing complete! Your download has started.';
 
             } catch (error) {
+                // --- MODIFIED: Enhanced, user-friendly error handling ---
                 statusDiv.className = 'status-error';
-                statusDiv.textContent = `An error occurred: ${error.message}`;
+                
+                if (error instanceof Response) {
+                    const errorText = await error.text();
+                    switch (error.status) {
+                        case 400: // Bad Request (e.g., wrong columns)
+                        case 413: // Payload Too Large (e.g., too many rows)
+                        case 404: // Not Found (e.g., no data extracted)
+                            // Use the helpful error message sent from the Python backend
+                            statusDiv.textContent = errorText;
+                            break;
+                        default:
+                            statusDiv.textContent = `An unexpected server error occurred (Code: ${error.status}). Please try again later.`;
+                    }
+                } else {
+                    // For network errors where the server couldn't be reached
+                    statusDiv.textContent = 'A network error occurred. Please check your connection and try again.';
+                }
                 console.error('Error:', error);
             } finally {
                 processButton.disabled = false;
