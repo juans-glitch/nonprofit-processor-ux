@@ -149,7 +149,7 @@
 
             try {
                 // The URL is now relative, pointing to the service itself.
-                const response = await fetch('/', {
+                const response = await fetch('https://nonprofit-xml-processor-741053962703.us-west3.run.app', {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/csv' },
                     body: uploadedFile
