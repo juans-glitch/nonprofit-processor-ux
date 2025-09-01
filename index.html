@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nonprofit 990 XML Data Processor</title>
+    <title>Nonprofit 990 Data Processor</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -82,26 +82,54 @@
         .status-processing { color: #007bff; }
         .status-error { color: #dc3545; font-weight: bold; }
         .status-success { color: #28a745; }
+        .login-input {
+            width: calc(100% - 20px);
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        #appSection {
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Nonprofit 990 Data Processor</h1>
-        <p>Upload a CSV file with two columns, 'ein' and 'year'. Each line is counted as a single entry, a single filing to be retrieved and processed.</p> 
-        <p>For example, a single, proper entry would have '123456789' under the <mark>ein</mark> column and '2019' under the <mark>year</mark> column. 
-            The tool will download, process, and provide a final data extract for you.</p>
-        
-        <div id="fileDropZone" class="file-upload-area">
-            <input type="file" id="fileInput" accept=".csv">
-            <p id="dropZoneText"><strong>Drag & drop your CSV file here</strong><br>or click to select a file.</p>
+        <div id="loginSection">
+            <h1>Login</h1>
+            <p>Please enter the credentials to access the tool.</p>
+            <input type="text" id="username" class="login-input" placeholder="Username">
+            <input type="password" id="password" class="login-input" placeholder="Password">
+            <button id="loginButton">Login</button>
+            <div id="loginStatus" class="status-error" style="margin-top: 15px;"></div>
         </div>
 
-        <button id="processButton" disabled>Process Files</button>
-
-        <div id="status"></div>
+        <div id="appSection">
+            <h1>Nonprofit 990 Data Processor</h1>
+            <p>Upload a CSV file with two columns, 'ein' and 'year'. Each line is counted as a single entry, a single filing to be retrieved and processed.</p>
+            
+            <div id="fileDropZone" class="file-upload-area">
+                <input type="file" id="fileInput" accept=".csv">
+                <p id="dropZoneText"><strong>Drag & drop your CSV file here</strong><br>or click to select a file.</p>
+            </div>
+            <button id="processButton" disabled>Process Files</button>
+            <div id="status"></div>
+        </div>
     </div>
 
     <script>
+        const CLOUD_RUN_URL = 'https://nonprofit-xml-processor-741053962703.us-west3.run.app/'; // Ensure this is correct
+        let authHeader = null;
+
+        // --- Element Selectors ---
+        const loginSection = document.getElementById('loginSection');
+        const appSection = document.getElementById('appSection');
+        const loginButton = document.getElementById('loginButton');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const loginStatus = document.getElementById('loginStatus');
         const fileDropZone = document.getElementById('fileDropZone');
         const fileInput = document.getElementById('fileInput');
         const processButton = document.getElementById('processButton');
@@ -109,16 +137,46 @@
         const dropZoneText = document.getElementById('dropZoneText');
         let uploadedFile = null;
 
+        // --- Login Logic ---
+        loginButton.addEventListener('click', async () => {
+            const username = usernameInput.value;
+            const password = passwordInput.value;
+            if (!username || !password) {
+                loginStatus.textContent = 'Username and password are required.';
+                return;
+            }
+
+            loginStatus.textContent = '';
+            const credentials = btoa(`${username}:${password}`); // Base64 encode
+            const tempAuthHeader = `Basic ${credentials}`;
+
+            try {
+                // Perform a test request to validate credentials
+                const response = await fetch(CLOUD_RUN_URL, {
+                    method: 'GET',
+                    headers: { 'Authorization': tempAuthHeader }
+                });
+
+                if (!response.ok) throw new Error('Invalid credentials');
+                
+                // On success, store the header and switch views
+                authHeader = tempAuthHeader;
+                loginSection.style.display = 'none';
+                appSection.style.display = 'block';
+
+            } catch (error) {
+                loginStatus.textContent = 'Login failed. Please check your credentials.';
+            }
+        });
+
+        // --- File Upload Logic ---
         fileDropZone.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
 
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             fileDropZone.addEventListener(eventName, preventDefaults, false);
         });
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
+        function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
 
         fileDropZone.addEventListener('dragover', () => fileDropZone.classList.add('dragover'));
         fileDropZone.addEventListener('dragleave', () => fileDropZone.classList.remove('dragover'));
@@ -132,7 +190,7 @@
                 uploadedFile = file;
                 dropZoneText.innerHTML = `✅<br>File selected: <strong>${file.name}</strong>`;
                 processButton.disabled = false;
-                statusDiv.textContent = ''; // Clear previous status
+                statusDiv.textContent = '';
             } else {
                 alert("Please select a valid CSV file.");
                 uploadedFile = null;
@@ -140,25 +198,25 @@
             }
         }
 
+        // --- File Processing Logic ---
         processButton.addEventListener('click', async () => {
-            if (!uploadedFile) return;
+            if (!uploadedFile || !authHeader) return;
 
             processButton.disabled = true;
             statusDiv.className = 'status-processing';
-            statusDiv.textContent = 'Uploading and processing... This may take several minutes for large files. Please be patient.';
+            statusDiv.textContent = 'Uploading and processing... This may take several minutes.';
 
             try {
-                // The URL is now relative, pointing to the service itself.
-                const response = await fetch('https://nonprofit-xml-processor-741053962703.us-west3.run.app', {
+                const response = await fetch(CLOUD_RUN_URL, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'text/csv' },
+                    headers: { 
+                        'Content-Type': 'text/csv',
+                        'Authorization': authHeader 
+                    },
                     body: uploadedFile
                 });
 
-                if (!response.ok) {
-                    // Pass the whole response to the catch block to handle specific errors.
-                    throw response;
-                }
+                if (!response.ok) throw response;
 
                 const blob = await response.blob();
                 const downloadUrl = window.URL.createObjectURL(blob);
@@ -166,9 +224,8 @@
                 a.style.display = 'none';
                 a.href = downloadUrl;
                 
-                // Create a dynamic filename with the current date.
                 const today = new Date();
-                const dateString = today.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+                const dateString = today.toISOString().split('T')[0];
                 a.download = `nonprofit_data_extract_${dateString}.csv`;
                 
                 document.body.appendChild(a);
@@ -181,27 +238,7 @@
 
             } catch (error) {
                 statusDiv.className = 'status-error';
-                
-                // Enhanced, user-friendly error handling.
-                if (error instanceof Response) {
-                    const errorText = await error.text();
-                    switch (error.status) {
-                        case 404:
-                            statusDiv.textContent = 'Processing finished, but no data could be found for the entries provided. Please check your CSV for typos.';
-                            break;
-                        case 413:
-                            statusDiv.textContent = 'The uploaded file is too large. Please split it into smaller files and try again.';
-                            break;
-                        case 400:
-                            statusDiv.textContent = `Error: The CSV file is invalid. The server says: "${errorText}"`;
-                            break;
-                        default:
-                            statusDiv.textContent = `An unexpected server error occurred (Code: ${error.status}). Please try again later.`;
-                    }
-                } else {
-                    // For network errors or other issues.
-                    statusDiv.textContent = 'A network error occurred. Please check your connection and try again.';
-                }
+                statusDiv.textContent = 'A network error occurred. Please check your connection or credentials and try again.';
                 console.error('Error:', error);
             } finally {
                 processButton.disabled = false;
