@@ -34,6 +34,16 @@ def process_ein_list(request):
         print(f"Error reading CSV from request: {e}")
         return (f"Invalid CSV data provided: {e}", 400, headers)
 
+    # --- Input Validation ---
+    MAX_ROWS = 5000 # A reasonable limit to prevent abuse or long-running requests.
+    if len(targets_df) > MAX_ROWS:
+        error_message = f"Error: The file has too many rows. Please provide a file with no more than {MAX_ROWS} entries."
+        return (error_message, 413, headers) # 413 is "Payload Too Large"
+
+    if 'ein' not in targets_df.columns or 'year' not in targets_df.columns:
+        error_message = "Error: Invalid CSV format. The file must contain 'ein' and 'year' columns."
+        return (error_message, 400, headers) # 400 is "Bad Request"
+
     all_extracted_data = []
     
     # --- MODIFIED: Replaced the serial for-loop with a parallel ThreadPoolExecutor ---
