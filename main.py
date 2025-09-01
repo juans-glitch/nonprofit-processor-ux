@@ -4,12 +4,13 @@ from bs4 import BeautifulSoup
 from lxml import etree
 import time
 from io import StringIO
+import concurrent.futures # ADDED: For parallel processing
 
 # --- Main Cloud Function Entry Point ---
 
 def process_ein_list(request):
     """
-    HTTP Cloud Function that receives a CSV of EINs, processes them,
+    HTTP Cloud Function that receives a CSV of EINs, processes them in parallel,
     and returns a final CSV with extracted 990 data.
     """
     # Set CORS headers for the preflight request and the main response
@@ -24,11 +25,8 @@ def process_ein_list(request):
 
     if request.method != 'POST':
         return ('Method Not Allowed', 405, headers)
-
-    # --- Start of the main processing logic ---
     
     try:
-        # Read the CSV data sent from the user's browser
         csv_data = request.data.decode('utf-8')
         targets_df = pd.read_csv(StringIO(csv_data), dtype='str')
         print(f"Received {len(targets_df)} records to process.")
@@ -38,38 +36,25 @@ def process_ein_list(request):
 
     all_extracted_data = []
     
-    for index, row in targets_df.iterrows():
-        ein = str(row['ein']).strip().replace('-', '')
-        year = str(row['year']).strip()
-        print(f"Processing EIN: {ein}, Year: {year}...")
-
-        # For the cloud version, we only use the robust ProPublica scraper
-        object_id = get_object_id_from_propublica_website(ein, year)
-            
-        if object_id:
-            download_url = f"https://projects.propublica.org/nonprofits/download-xml?object_id={object_id}"
-            print(f"  -> Downloading XML from: {download_url}")
+    # --- MODIFIED: Replaced the serial for-loop with a parallel ThreadPoolExecutor ---
+    # This will process up to 10 filings at the same time, dramatically speeding up the process.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        # Create a dictionary to map future results back to the row that spawned them
+        future_to_row = {executor.submit(process_single_filing, row): row for index, row in targets_df.iterrows()}
+        
+        # Process results as they are completed
+        for future in concurrent.futures.as_completed(future_to_row):
             try:
-                response = requests.get(download_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
-                response.raise_for_status()
-                
-                print("  -> Processing XML data...")
-                extracted_record = parse_xml_data(response.content)
-                if extracted_record:
-                    all_extracted_data.append(extracted_record)
-                    print("  -> Successfully extracted data.")
-
-            except requests.exceptions.RequestException as e:
-                print(f"  -> Download failed for {object_id}. Reason: {e}")
-        else:
-            print(f"  -> No downloadable e-file record found for EIN {ein}, Year {year}.")
-            
-        time.sleep(0.5) # Be polite to the server
+                result = future.result()
+                if result:
+                    all_extracted_data.append(result)
+            except Exception as exc:
+                row_info = future_to_row[future]
+                print(f"Row for EIN {row_info.get('ein')} generated an exception: {exc}")
 
     if not all_extracted_data:
         return ('Process finished, but no data could be extracted from the provided filings.', 404, headers)
 
-    # --- Final Step: Prepare and return the final CSV ---
     final_df = pd.DataFrame(all_extracted_data)
     
     leading_cols = ['Ein', 'OrganizationName']
@@ -81,7 +66,6 @@ def process_ein_list(request):
 
     final_csv_string = final_df.to_csv(index=False)
     
-    # Set headers to trigger a file download in the user's browser
     response_headers = headers.copy()
     response_headers['Content-Type'] = 'text/csv'
     response_headers['Content-Disposition'] = 'attachment; filename="nonprofit_data_extract.csv"'
@@ -90,7 +74,41 @@ def process_ein_list(request):
     return (final_csv_string, 200, response_headers)
 
 
-# --- Helper Functions ---
+# --- ADDED: New helper function to process a single row for parallelism ---
+def process_single_filing(row):
+    """
+    Takes a single row from the input DataFrame, processes it,
+    and returns a dictionary of extracted data or None.
+    """
+    ein = str(row['ein']).strip().replace('-', '')
+    year = str(row['year']).strip()
+    print(f"Processing EIN: {ein}, Year: {year}...")
+
+    object_id = get_object_id_from_propublica_website(ein, year)
+        
+    if object_id:
+        download_url = f"https://projects.propublica.org/nonprofits/download-xml?object_id={object_id}"
+        print(f"  -> Downloading XML from: {download_url}")
+        try:
+            response = requests.get(download_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
+            response.raise_for_status()
+            
+            print("  -> Processing XML data...")
+            extracted_record = parse_xml_data(response.content)
+            if extracted_record:
+                print("  -> Successfully extracted data.")
+                return extracted_record
+
+        except requests.exceptions.RequestException as e:
+            print(f"  -> Download failed for {object_id}. Reason: {e}")
+    else:
+        print(f"  -> No downloadable e-file record found for EIN {ein}, Year {year}.")
+    
+    # Return None if any step fails
+    return None
+
+
+# --- Helper Functions (No changes below this line) ---
 
 def get_object_id_from_propublica_website(ein, year):
     """Scrapes ProPublica by finding all XML links and matching the object_id prefix."""
