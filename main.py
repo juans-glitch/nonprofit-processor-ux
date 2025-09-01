@@ -35,7 +35,7 @@ def process_ein_list(request):
         return (f"Invalid CSV data provided: {e}", 400, headers)
 
     # --- Input Validation ---
-    MAX_ROWS = 5000 # A reasonable limit to prevent abuse or long-running requests.
+    MAX_ROWS = 3 # A reasonable limit to prevent abuse or long-running requests.
     if len(targets_df) > MAX_ROWS:
         error_message = f"Error: The file has too many rows. Please provide a file with no more than {MAX_ROWS} entries."
         return (error_message, 413, headers) # 413 is "Payload Too Large"
@@ -84,7 +84,7 @@ def process_ein_list(request):
     return (final_csv_string, 200, response_headers)
 
 
-# --- ADDED: New helper function to process a single row for parallelism ---
+# --- Function to process a single row for parallelism ---
 def process_single_filing(row):
     """
     Takes a single row from the input DataFrame, processes it,
@@ -118,7 +118,7 @@ def process_single_filing(row):
     return None
 
 
-# --- Helper Functions (No changes below this line) ---
+# --- Helper Functions ---
 
 def get_object_id_from_propublica_website(ein, year):
     """Scrapes ProPublica by finding all XML links and matching the object_id prefix."""
