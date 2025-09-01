@@ -46,8 +46,8 @@ def process_ein_list(request):
 
     all_extracted_data = []
     
-    # --- MODIFIED: Replaced the serial for-loop with a parallel ThreadPoolExecutor ---
-    # This will process up to 10 filings at the same time, dramatically speeding up the process.
+    # --- Parallel ThreadPoolExecutor ---
+    # This will process up to 10 filings at the same time, speeding up the process.
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         # Create a dictionary to map future results back to the row that spawned them
         future_to_row = {executor.submit(process_single_filing, row): row for index, row in targets_df.iterrows()}
