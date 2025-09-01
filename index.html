@@ -82,54 +82,29 @@
         .status-processing { color: #007bff; }
         .status-error { color: #dc3545; font-weight: bold; }
         .status-success { color: #28a745; }
-        .login-input {
-            width: calc(100% - 20px);
-            padding: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            font-size: 16px;
-        }
-        #appSection {
-            display: none;
-        }
     </style>
 </head>
 <body>
     <div class="container">
-        <div id="loginSection">
-            <h1>Login</h1>
-            <p>Please enter the credentials to access the tool.</p>
-            <input type="text" id="username" class="login-input" placeholder="Username">
-            <input type="password" id="password" class="login-input" placeholder="Password">
-            <button id="loginButton">Login</button>
-            <div id="loginStatus" class="status-error" style="margin-top: 15px;"></div>
+        <h1>Nonprofit 990 Data Processor</h1>
+        <p>Upload a CSV file with two columns, 'ein' and 'year'. Each line is counted as a single entry, a single filing to be retrieved and processed.</p> 
+        <p>For example, a single, proper entry would have '123456789' under the <mark>ein</mark> column and '2019' under the <mark>year</mark> column. 
+            The tool will download, process, and provide a final data extract for you.</p>
+        
+        <div id="fileDropZone" class="file-upload-area">
+            <input type="file" id="fileInput" accept=".csv">
+            <p id="dropZoneText"><strong>Drag & drop your CSV file here</strong><br>or click to select a file.</p>
         </div>
 
-        <div id="appSection">
-            <h1>Nonprofit 990 Data Processor</h1>
-            <p>Upload a CSV file with two columns, 'ein' and 'year'. Each line is counted as a single entry, a single filing to be retrieved and processed.</p>
-            
-            <div id="fileDropZone" class="file-upload-area">
-                <input type="file" id="fileInput" accept=".csv">
-                <p id="dropZoneText"><strong>Drag & drop your CSV file here</strong><br>or click to select a file.</p>
-            </div>
-            <button id="processButton" disabled>Process Files</button>
-            <div id="status"></div>
-        </div>
+        <button id="processButton" disabled>Process Files</button>
+
+        <div id="status"></div>
     </div>
 
     <script>
-        const CLOUD_RUN_URL = 'https://nonprofit-xml-processor-741053962703.us-west3.run.app/'; // Ensure this is correct
-        let authHeader = null;
+        // --- IMPORTANT: AFTER DEPLOYING, PASTE YOUR CLOUD FUNCTION URL HERE ---
+        const CLOUD_FUNCTION_URL = 'https://non-processor-123456789.us-south3.run.app'; 
 
-        // --- Element Selectors ---
-        const loginSection = document.getElementById('loginSection');
-        const appSection = document.getElementById('appSection');
-        const loginButton = document.getElementById('loginButton');
-        const usernameInput = document.getElementById('username');
-        const passwordInput = document.getElementById('password');
-        const loginStatus = document.getElementById('loginStatus');
         const fileDropZone = document.getElementById('fileDropZone');
         const fileInput = document.getElementById('fileInput');
         const processButton = document.getElementById('processButton');
@@ -137,46 +112,16 @@
         const dropZoneText = document.getElementById('dropZoneText');
         let uploadedFile = null;
 
-        // --- Login Logic ---
-        loginButton.addEventListener('click', async () => {
-            const username = usernameInput.value;
-            const password = passwordInput.value;
-            if (!username || !password) {
-                loginStatus.textContent = 'Username and password are required.';
-                return;
-            }
-
-            loginStatus.textContent = '';
-            const credentials = btoa(`${username}:${password}`); // Base64 encode
-            const tempAuthHeader = `Basic ${credentials}`;
-
-            try {
-                // Perform a test request to validate credentials
-                const response = await fetch(CLOUD_RUN_URL, {
-                    method: 'GET',
-                    headers: { 'Authorization': tempAuthHeader }
-                });
-
-                if (!response.ok) throw new Error('Invalid credentials');
-                
-                // On success, store the header and switch views
-                authHeader = tempAuthHeader;
-                loginSection.style.display = 'none';
-                appSection.style.display = 'block';
-
-            } catch (error) {
-                loginStatus.textContent = 'Login failed. Please check your credentials.';
-            }
-        });
-
-        // --- File Upload Logic ---
         fileDropZone.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
 
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
             fileDropZone.addEventListener(eventName, preventDefaults, false);
         });
-        function preventDefaults(e) { e.preventDefault(); e.stopPropagation(); }
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
 
         fileDropZone.addEventListener('dragover', () => fileDropZone.classList.add('dragover'));
         fileDropZone.addEventListener('dragleave', () => fileDropZone.classList.remove('dragover'));
@@ -190,7 +135,7 @@
                 uploadedFile = file;
                 dropZoneText.innerHTML = `✅<br>File selected: <strong>${file.name}</strong>`;
                 processButton.disabled = false;
-                statusDiv.textContent = '';
+                statusDiv.textContent = ''; // Clear previous status
             } else {
                 alert("Please select a valid CSV file.");
                 uploadedFile = null;
@@ -198,36 +143,36 @@
             }
         }
 
-        // --- File Processing Logic ---
         processButton.addEventListener('click', async () => {
-            if (!uploadedFile || !authHeader) return;
+            if (!uploadedFile) return;
+
+            if (CLOUD_FUNCTION_URL === 'PASTE_YOUR_TRIGGER_URL_HERE' || !CLOUD_FUNCTION_URL) {
+                alert("Configuration Error: The Cloud Function URL has not been set in the index.html file. Please contact the administrator.");
+                return;
+            }
 
             processButton.disabled = true;
             statusDiv.className = 'status-processing';
-            statusDiv.textContent = 'Uploading and processing... This may take several minutes.';
+            statusDiv.textContent = 'Uploading and processing... This may take several minutes for large files. Please be patient.';
 
             try {
-                const response = await fetch(CLOUD_RUN_URL, {
+                const response = await fetch(CLOUD_FUNCTION_URL, {
                     method: 'POST',
-                    headers: { 
-                        'Content-Type': 'text/csv',
-                        'Authorization': authHeader 
-                    },
+                    headers: { 'Content-Type': 'text/csv' },
                     body: uploadedFile
                 });
 
-                if (!response.ok) throw response;
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server error (${response.status}): ${errorText}`);
+                }
 
                 const blob = await response.blob();
                 const downloadUrl = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.style.display = 'none';
                 a.href = downloadUrl;
-                
-                const today = new Date();
-                const dateString = today.toISOString().split('T')[0];
-                a.download = `nonprofit_data_extract_${dateString}.csv`;
-                
+                a.download = 'nonprofit_data_extract.csv';
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(downloadUrl);
@@ -238,7 +183,7 @@
 
             } catch (error) {
                 statusDiv.className = 'status-error';
-                statusDiv.textContent = 'A network error occurred. Please check your connection or credentials and try again.';
+                statusDiv.textContent = `An error occurred: ${error.message}`;
                 console.error('Error:', error);
             } finally {
                 processButton.disabled = false;
