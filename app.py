@@ -1,6 +1,5 @@
 # app.py
 # A desktop GUI application for processing nonprofit 990 tax filing data.
-# This version includes an improved UI styled to look like the original web interface.
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -64,7 +63,7 @@ def parse_xml_data(xml_content):
             result = context_node.xpath(path, namespaces=ns)
             return result[0].text.strip() if result and result[0].text else ""
 
-        # This is the full dictionary of XPaths from your original script
+        # This is the full dictionary of XPaths from the original script
         field_mappings = {
             'Ein': './/irs:Filer/irs:EIN',
             'OrganizationName': './/irs:Filer/irs:BusinessName/irs:BusinessNameLine1Txt',
