@@ -1,4 +1,3 @@
-# nonprofit-processor-ux
 # Nonprofit 990 Data Processor
 
 A simple web-based tool for extracting financial data from nonprofit tax filings (Form 990). The tool takes a CSV file containing a list of nonprofit Employer Identification Numbers (EINs) and tax years, scrapes the necessary data from ProPublica's Nonprofit Explorer, and returns a single, consolidated CSV file to the user.
