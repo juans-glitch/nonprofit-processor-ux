@@ -2,14 +2,14 @@
 
 A simple web-based tool for extracting financial data from nonprofit tax filings (Form 990). The tool takes a CSV file containing a list of nonprofit Employer Identification Numbers (EINs) and tax years, scrapes the necessary data from ProPublica's Nonprofit Explorer, and returns a single, consolidated CSV file to the user.
 
-## Architecture 🏗️
+## Architecture
 
 The project is composed of two main parts that work together:
 
 * **Frontend**: A static `index.html` file containing HTML, CSS, and JavaScript. It provides the user interface for file uploads and displays status messages. It is designed to be hosted on any static site host, such as GitHub Pages.
 * **Backend**: A Python-based **Google Cloud Function**, deployed on **Cloud Run**. This serverless function contains all the logic for parsing the input CSV, scraping ProPublica, processing XML tax forms, and generating the final CSV output.
 
-## Features ✨
+## Features
 
 * **Simple CSV Upload**: An intuitive drag-and-drop or file-select interface for uploading the input file.
 * **Parallel Processing**: The backend uses multithreading to process up to 10 filings concurrently, dramatically speeding up the processing time for large lists.
@@ -17,7 +17,7 @@ The project is composed of two main parts that work together:
 * **User-Friendly Error Handling**: The frontend displays specific, easy-to-understand error messages to help users correct their input.
 * **Dynamic Filenames**: Downloaded CSV files are automatically named with the current date (e.g., `nonprofit_data_extract_2025-09-01.csv`) to help with organization.
 
-## Setup & Configuration 🛠️
+## Setup & Configuration
 
 Follow these steps to deploy and configure your own instance of this tool.
 
@@ -65,15 +65,3 @@ The frontend needs to know the URL of the backend to send requests to.
 ├── requirements.txt # Python dependencies for the backend
 └── index.html       # The static HTML/CSS/JS frontend
 ```
-
-## Future Enhancements 🚀
-
-This tool can be extended with additional features for security, usability, and robustness.
-
-* **Security**: Implement a login system (e.g., Basic Authentication with credentials stored in Secret Manager) to restrict access.
-* **Cost Control**: Create a "circuit breaker" function that automatically disables the service if it approaches a Cloud Billing budget limit.
-* **Advanced UX**:
-    * Add a real-time progress bar by having the backend report its status to Firestore.
-    * Implement email notifications for long-running jobs.
-* **Caching**: Use Memorystore or Firestore to cache results for frequently requested EIN/year pairs to improve speed and reduce external requests.
-* **Monitoring**: Integrate structured logging with Cloud Logging and create dashboards and alerts in Cloud Monitoring to track performance and error rates.
