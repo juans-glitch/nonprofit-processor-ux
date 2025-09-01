@@ -42,39 +42,38 @@ def process_ein_list(request):
     - Serves the index.html on GET.
     - Processes CSV on POST after authentication.
     """
-    # --- ADDED: Basic Authentication Check ---
-    # The OPTIONS method is used for CORS preflight and should not be authenticated.
-    if request.method != 'OPTIONS':
-        auth_header = request.headers.get("Authorization")
-        expected_credentials = get_basic_auth_credentials()
-        
-        if auth_header is None:
-            # If no auth header, respond with 401 to prompt the browser's login box.
-            return ('Unauthorized', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
-
-        try:
-            # The header is "Basic BASE64_ENCODED_STRING"
-            encoded_creds = auth_header.split(" ")[1]
-            decoded_creds = base64.b64decode(encoded_creds).decode("utf-8")
-            
-            if decoded_creds != expected_credentials:
-                return ('Invalid credentials', 401)
-        except Exception:
-            return ('Invalid authorization header', 401)
-
-    # --- MODIFIED: Request Routing ---
-    # Set CORS headers for all responses.
+    # --- CORRECTED: Define headers at the top ---
     headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     }
-    
-    # Handle CORS preflight request
+
+    # Handle CORS preflight request first, as it should not be authenticated.
     if request.method == 'OPTIONS':
         return ('', 204, headers)
 
-    # --- ADDED: Serve the webpage on GET request ---
+    # --- CORRECTED: Basic Authentication Check now includes headers on failure ---
+    auth_header = request.headers.get("Authorization")
+    expected_credentials = get_basic_auth_credentials()
+    
+    if auth_header is None:
+        # If no auth header, prompt for login, now with CORS headers.
+        auth_headers = headers.copy()
+        auth_headers['WWW-Authenticate'] = 'Basic realm="Login Required"'
+        return ('Unauthorized', 401, auth_headers)
+
+    try:
+        encoded_creds = auth_header.split(" ")[1]
+        decoded_creds = base64.b64decode(encoded_creds).decode("utf-8")
+        if decoded_creds != expected_credentials:
+            # On invalid credentials, send error with CORS headers.
+            return ('Invalid credentials', 401, headers)
+    except Exception:
+        # On malformed header, send error with CORS headers.
+        return ('Invalid authorization header', 401, headers)
+    
+    # --- Request Routing ---
     if request.method == 'GET':
         try:
             with open('index.html', 'r') as f:
@@ -83,55 +82,53 @@ def process_ein_list(request):
         except FileNotFoundError:
             return ('Frontend not found.', 500, headers)
 
-    # The rest of the function handles the POST request
-    if request.method != 'POST':
-        return ('Method Not Allowed', 405, headers)
-    
-    try:
-        csv_data = request.data.decode('utf-8')
-        targets_df = pd.read_csv(StringIO(csv_data), dtype='str')
+    if request.method == 'POST':
+        try:
+            csv_data = request.data.decode('utf-8')
+            targets_df = pd.read_csv(StringIO(csv_data), dtype='str')
+            
+            MAX_ROWS = 3 
+            if len(targets_df) > MAX_ROWS:
+                return (f"Too many rows. Please provide a file with no more than {MAX_ROWS} entries.", 413, headers)
+            if 'ein' not in targets_df.columns or 'year' not in targets_df.columns:
+                return ("Invalid CSV format. Ensure it has 'ein' and 'year' columns.", 400, headers)
+            
+            print(f"Received {len(targets_df)} records to process.")
+        except Exception as e:
+            return (f"Invalid CSV data provided: {e}", 400, headers)
+
+        all_extracted_data = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_row = {executor.submit(process_single_filing, row): row for _, row in targets_df.iterrows()}
+            for future in concurrent.futures.as_completed(future_to_row):
+                try:
+                    result = future.result()
+                    if result:
+                        all_extracted_data.append(result)
+                except Exception as exc:
+                    row_info = future_to_row[future]
+                    print(f"Row for EIN {row_info.get('ein')} generated an exception: {exc}")
+
+        if not all_extracted_data:
+            return ('Process finished, but no data could be extracted from the provided filings.', 404, headers)
+
+        final_df = pd.DataFrame(all_extracted_data)
+        leading_cols = ['Ein', 'OrganizationName']
+        contractor_cols = sorted([col for col in final_df.columns if col.startswith('Contractor_')])
+        other_cols = [col for col in final_df.columns if col not in leading_cols and col not in contractor_cols]
+        final_leading_cols = [col for col in leading_cols if col in final_df.columns]
+        final_df = final_df[final_leading_cols + contractor_cols + other_cols]
+
+        final_csv_string = final_df.to_csv(index=False)
+        response_headers = headers.copy()
+        response_headers['Content-Type'] = 'text/csv'
+        response_headers['Content-Disposition'] = 'attachment; filename="nonprofit_data_extract.csv"'
         
-        # --- ADDED: Input Validation ---
-        MAX_ROWS = 3 
-        if len(targets_df) > MAX_ROWS:
-            return (f"Too many rows. Please provide a file with no more than {MAX_ROWS} entries.", 413, headers)
-        if 'ein' not in targets_df.columns or 'year' not in targets_df.columns:
-            return ("Invalid CSV format. Ensure it has 'ein' and 'year' columns.", 400, headers)
-        
-        print(f"Received {len(targets_df)} records to process.")
-    except Exception as e:
-        return (f"Invalid CSV data provided: {e}", 400, headers)
+        print("Process complete. Returning final CSV.")
+        return (final_csv_string, 200, response_headers)
 
-    # --- MODIFIED: Parallel Processing ---
-    all_extracted_data = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_row = {executor.submit(process_single_filing, row): row for _, row in targets_df.iterrows()}
-        for future in concurrent.futures.as_completed(future_to_row):
-            try:
-                result = future.result()
-                if result:
-                    all_extracted_data.append(result)
-            except Exception as exc:
-                row_info = future_to_row[future]
-                print(f"Row for EIN {row_info.get('ein')} generated an exception: {exc}")
-
-    if not all_extracted_data:
-        return ('Process finished, but no data could be extracted from the provided filings.', 404, headers)
-
-    final_df = pd.DataFrame(all_extracted_data)
-    leading_cols = ['Ein', 'OrganizationName']
-    contractor_cols = sorted([col for col in final_df.columns if col.startswith('Contractor_')])
-    other_cols = [col for col in final_df.columns if col not in leading_cols and col not in contractor_cols]
-    final_leading_cols = [col for col in leading_cols if col in final_df.columns]
-    final_df = final_df[final_leading_cols + contractor_cols + other_cols]
-
-    final_csv_string = final_df.to_csv(index=False)
-    response_headers = headers.copy()
-    response_headers['Content-Type'] = 'text/csv'
-    response_headers['Content-Disposition'] = 'attachment; filename="nonprofit_data_extract.csv"'
-    
-    print("Process complete. Returning final CSV.")
-    return (final_csv_string, 200, response_headers)
+    # If method is not GET, POST, or OPTIONS
+    return ('Method Not Allowed', 405, headers)
 
 # --- ADDED: New function to process a single row for parallelism ---
 def process_single_filing(row):
