@@ -4,155 +4,94 @@ from bs4 import BeautifulSoup
 from lxml import etree
 import time
 from io import StringIO
-import os
-import base64
-import concurrent.futures
-from google.cloud import secretmanager
-
-# --- Configuration for Basic Authentication ---
-# Fetch the Project ID from the environment variable set by Google Cloud.
-PROJECT_ID = os.environ.get('GCP_PROJECT') 
-# IMPORTANT: Replace this with the name of the secret you created in Secret Manager.
-SECRET_ID = "nonprofit-tool-credentials" 
-# This will cache the credentials after the first fetch to improve performance.
-CACHED_SECRET = None 
-
-def get_basic_auth_credentials():
-    """Fetches and caches the basic auth credentials from Secret Manager."""
-    global CACHED_SECRET
-    if CACHED_SECRET:
-        return CACHED_SECRET
-
-    try:
-        client = secretmanager.SecretManagerServiceClient()
-        name = f"projects/{PROJECT_ID}/secrets/{SECRET_ID}/versions/latest"
-        response = client.access_secret_version(request={"name": name})
-        CACHED_SECRET = response.payload.data.decode("UTF-8")
-        return CACHED_SECRET
-    except Exception as e:
-        print(f"FATAL: Could not fetch secret from Secret Manager: {e}")
-        # In case of failure, return a dummy value to prevent crashes, but auth will fail.
-        return "user:password"
 
 # --- Main Cloud Function Entry Point ---
 
 def process_ein_list(request):
     """
-    HTTP Cloud Function that handles all requests.
-    - Serves the index.html on GET.
-    - Processes CSV on POST after authentication.
+    HTTP Cloud Function that receives a CSV of EINs, processes them,
+    and returns a final CSV with extracted 990 data.
     """
-    # --- CORRECTED: Define headers at the top ---
+    # Set CORS headers for the preflight request and the main response
     headers = {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
     }
 
-    # Handle CORS preflight request first, as it should not be authenticated.
     if request.method == 'OPTIONS':
         return ('', 204, headers)
 
-    # --- CORRECTED: Basic Authentication Check now includes headers on failure ---
-    auth_header = request.headers.get("Authorization")
-    expected_credentials = get_basic_auth_credentials()
-    
-    if auth_header is None:
-        # If no auth header, prompt for login, now with CORS headers.
-        auth_headers = headers.copy()
-        auth_headers['WWW-Authenticate'] = 'Basic realm="Login Required"'
-        return ('Unauthorized', 401, auth_headers)
+    if request.method != 'POST':
+        return ('Method Not Allowed', 405, headers)
 
+    # --- Start of the main processing logic ---
+    
     try:
-        encoded_creds = auth_header.split(" ")[1]
-        decoded_creds = base64.b64decode(encoded_creds).decode("utf-8")
-        if decoded_creds != expected_credentials:
-            # On invalid credentials, send error with CORS headers.
-            return ('Invalid credentials', 401, headers)
-    except Exception:
-        # On malformed header, send error with CORS headers.
-        return ('Invalid authorization header', 401, headers)
-    
-    # --- Request Routing ---
-    if request.method == 'GET':
-        try:
-            with open('index.html', 'r') as f:
-                html_content = f.read()
-            return (html_content, 200, headers)
-        except FileNotFoundError:
-            return ('Frontend not found.', 500, headers)
+        # Read the CSV data sent from the user's browser
+        csv_data = request.data.decode('utf-8')
+        targets_df = pd.read_csv(StringIO(csv_data), dtype='str')
+        print(f"Received {len(targets_df)} records to process.")
+    except Exception as e:
+        print(f"Error reading CSV from request: {e}")
+        return (f"Invalid CSV data provided: {e}", 400, headers)
 
-    if request.method == 'POST':
-        try:
-            csv_data = request.data.decode('utf-8')
-            targets_df = pd.read_csv(StringIO(csv_data), dtype='str')
+    all_extracted_data = []
+    
+    for index, row in targets_df.iterrows():
+        ein = str(row['ein']).strip().replace('-', '')
+        year = str(row['year']).strip()
+        print(f"Processing EIN: {ein}, Year: {year}...")
+
+        # For the cloud version, we only use the robust ProPublica scraper
+        object_id = get_object_id_from_propublica_website(ein, year)
             
-            MAX_ROWS = 4 
-            if len(targets_df) > MAX_ROWS:
-                return (f"Too many rows. Please provide a file with no more than {MAX_ROWS} entries.", 413, headers)
-            if 'ein' not in targets_df.columns or 'year' not in targets_df.columns:
-                return ("Invalid CSV format. Ensure it has 'ein' and 'year' columns.", 400, headers)
+        if object_id:
+            download_url = f"https://projects.propublica.org/nonprofits/download-xml?object_id={object_id}"
+            print(f"  -> Downloading XML from: {download_url}")
+            try:
+                response = requests.get(download_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
+                response.raise_for_status()
+                
+                print("  -> Processing XML data...")
+                extracted_record = parse_xml_data(response.content)
+                if extracted_record:
+                    all_extracted_data.append(extracted_record)
+                    print("  -> Successfully extracted data.")
+
+            except requests.exceptions.RequestException as e:
+                print(f"  -> Download failed for {object_id}. Reason: {e}")
+        else:
+            print(f"  -> No downloadable e-file record found for EIN {ein}, Year {year}.")
             
-            print(f"Received {len(targets_df)} records to process.")
-        except Exception as e:
-            return (f"Invalid CSV data provided: {e}", 400, headers)
+        time.sleep(0.5) # Be polite to the server
 
-        all_extracted_data = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_row = {executor.submit(process_single_filing, row): row for _, row in targets_df.iterrows()}
-            for future in concurrent.futures.as_completed(future_to_row):
-                try:
-                    result = future.result()
-                    if result:
-                        all_extracted_data.append(result)
-                except Exception as exc:
-                    row_info = future_to_row[future]
-                    print(f"Row for EIN {row_info.get('ein')} generated an exception: {exc}")
+    if not all_extracted_data:
+        return ('Process finished, but no data could be extracted from the provided filings.', 404, headers)
 
-        if not all_extracted_data:
-            return ('Process finished, but no data could be extracted from the provided filings.', 404, headers)
-
-        final_df = pd.DataFrame(all_extracted_data)
-        leading_cols = ['Ein', 'OrganizationName']
-        contractor_cols = sorted([col for col in final_df.columns if col.startswith('Contractor_')])
-        other_cols = [col for col in final_df.columns if col not in leading_cols and col not in contractor_cols]
-        final_leading_cols = [col for col in leading_cols if col in final_df.columns]
-        final_df = final_df[final_leading_cols + contractor_cols + other_cols]
-
-        final_csv_string = final_df.to_csv(index=False)
-        response_headers = headers.copy()
-        response_headers['Content-Type'] = 'text/csv'
-        response_headers['Content-Disposition'] = 'attachment; filename="nonprofit_data_extract.csv"'
-        
-        print("Process complete. Returning final CSV.")
-        return (final_csv_string, 200, response_headers)
-
-    # If method is not GET, POST, or OPTIONS
-    return ('Method Not Allowed', 405, headers)
-
-# --- ADDED: New function to process a single row for parallelism ---
-def process_single_filing(row):
-    """Processes a single EIN/year pair."""
-    ein = str(row['ein']).strip().replace('-', '')
-    year = str(row['year']).strip()
-    print(f"Processing EIN: {ein}, Year: {year}...")
-
-    object_id = get_object_id_from_propublica_website(ein, year)
+    # --- Final Step: Prepare and return the final CSV ---
+    final_df = pd.DataFrame(all_extracted_data)
     
-    if object_id:
-        download_url = f"https://projects.propublica.org/nonprofits/download-xml?object_id={object_id}"
-        try:
-            response = requests.get(download_url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=30)
-            response.raise_for_status()
-            return parse_xml_data(response.content)
-        except requests.exceptions.RequestException as e:
-            print(f"  -> Download failed for {object_id}. Reason: {e}")
-    else:
-        print(f"  -> No downloadable e-file record found for EIN {ein}, Year {year}.")
+    leading_cols = ['Ein', 'OrganizationName']
+    contractor_cols = sorted([col for col in final_df.columns if col.startswith('Contractor_')])
+    other_cols = [col for col in final_df.columns if col not in leading_cols and col not in contractor_cols]
+    final_leading_cols = [col for col in leading_cols if col in final_df.columns]
     
-    return None
+    final_df = final_df[final_leading_cols + contractor_cols + other_cols]
 
-# --- Helper Functions ---
+    final_csv_string = final_df.to_csv(index=False)
+    
+    # Set headers to trigger a file download in the user's browser
+    response_headers = headers.copy()
+    response_headers['Content-Type'] = 'text/csv'
+    response_headers['Content-Disposition'] = 'attachment; filename="nonprofit_data_extract.csv"'
+    
+    print("Process complete. Returning final CSV.")
+    return (final_csv_string, 200, response_headers)
+
+
+# --- Helper Functions (from your working local script) ---
+
 def get_object_id_from_propublica_website(ein, year):
     """Scrapes ProPublica by finding all XML links and matching the object_id prefix."""
     print(f"  -> Scraping ProPublica website...")
@@ -270,7 +209,7 @@ def parse_xml_data(xml_content):
             'RcvblFromDisqualifiedPrsnGrp': './/irs:IRS990/irs:RcvblFromDisqualifiedPrsnGrp/irs:EOYAmt',
             'OthNotesLoansReceivableNetGrp': './/irs:IRS990/irs:OthNotesLoansReceivableNetGrp/irs:EOYAmt',
             'InventoriesForSaleOrUseGrp': './/irs:IRS990/irs:InventoriesForSaleOrUseGrp/irs:EOYAmt',
-            'PrepaidExpensesDefrdChargesGrp': './/irs:IRS990/prepaidExpensesDefrdChargesGrp/irs:EOYAmt',
+            'PrepaidExpensesDefrdChargesGrp': './/irs:IRS990/irs:PrepaidExpensesDefrdChargesGrp/irs:EOYAmt',
             'LandBldgEquipBasisNetGrp': './/irs:IRS990/irs:LandBldgEquipBasisNetGrp/irs:EOYAmt',
             'InvestmentsPubTradedSecGrp': './/irs:IRS990/irs:InvestmentsPubTradedSecGrp/irs:EOYAmt',
             'InvestmentsOtherSecuritiesGrp': './/irs:IRS990/irs:InvestmentsOtherSecuritiesGrp/irs:EOYAmt',
