@@ -87,7 +87,7 @@ def process_ein_list(request):
             csv_data = request.data.decode('utf-8')
             targets_df = pd.read_csv(StringIO(csv_data), dtype='str')
             
-            MAX_ROWS = 3 
+            MAX_ROWS = 4 
             if len(targets_df) > MAX_ROWS:
                 return (f"Too many rows. Please provide a file with no more than {MAX_ROWS} entries.", 413, headers)
             if 'ein' not in targets_df.columns or 'year' not in targets_df.columns:
