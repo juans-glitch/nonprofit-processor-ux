@@ -90,7 +90,7 @@ def process_ein_list(request):
     return (final_csv_string, 200, response_headers)
 
 
-# --- Helper Functions (from your working local script) ---
+# --- Helper Functions ---
 
 def get_object_id_from_propublica_website(ein, year):
     """Scrapes ProPublica by finding all XML links and matching the object_id prefix."""
