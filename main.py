@@ -35,7 +35,7 @@ def process_ein_list(request):
         return (f"Invalid CSV data provided: {e}", 400, headers)
 
     # --- Input Validation ---
-    MAX_ROWS = 250 # A reasonable limit to prevent abuse or long-running requests.
+    MAX_ROWS = 500 # A reasonable limit to prevent abuse or long-running requests.
     if len(targets_df) > MAX_ROWS:
         error_message = f"Error: The file has too many rows. Please provide a file with no more than {MAX_ROWS} entries."
         return (error_message, 413, headers) # 413 is "Payload Too Large"
