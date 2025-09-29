@@ -294,7 +294,7 @@ class App:
         try:
             self.progress_queue.put("Reading CSV file...")
             targets_df = pd.read_csv(self.input_file_path, dtype='str')
-            MAX_ROWS = 250
+            MAX_ROWS = 500
             if len(targets_df) > MAX_ROWS:
                 raise ValueError(f"Error: File has more than {MAX_ROWS} rows.")
             if 'ein' not in targets_df.columns or 'year' not in targets_df.columns:
